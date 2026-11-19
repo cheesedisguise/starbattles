@@ -138,7 +138,13 @@
       },
       fresh() {
         noise(0.45, { type: 'bandpass', freq: 400, to: 4000, q: 0.8, vol: 0.18 });
-        tone(523.25, 0.4, { vol: 0.06, delay: 0.25 });
+      },
+      appear() {
+        [392, 523.25, 659.25].forEach((f, i) => tone(f, 0.25, { vol: 0.07, delay: 0.05 + i * 0.06 }));
+      },
+      wrong() {
+        tone(330, 0.18, { type: 'triangle', vol: 0.14 });
+        tone(247, 0.3, { type: 'triangle', vol: 0.14, delay: 0.14 });
       },
       win() {
         const notes = [523.25, 659.25, 783.99, 1046.5, 1318.5, 1568];
@@ -167,11 +173,58 @@
 
   function blankGrid(n, v) { return Array.from({ length: n }, () => new Array(n).fill(v)); }
 
+  // Grid sizes offered for each number of stars per row.
+  const SIZES = { 1: [5, 6, 7, 8, 9, 10], 2: [8, 9, 10, 11], 3: [12, 13, 14] };
+  const DEFAULT_SIZE = { 1: 8, 2: 10, 3: 13 };
+
+  function fillSizes(k, n) {
+    sizeSel.innerHTML = SIZES[k].map((v) => `<option value="${v}">${v}×${v}</option>`).join('');
+    sizeSel.value = String(SIZES[k].includes(n) ? n : DEFAULT_SIZE[k]);
+    $('starsRange').value = k;
+    $('starsVal').textContent = k + '★';
+  }
+
+  // Generate in a worker so the animation keeps running; fall back to
+  // the main thread where workers aren't allowed (e.g. opened from disk).
+  let worker = null, workerOk = true, reqId = 0;
+  function generate(n, k) {
+    return new Promise((resolve) => {
+      const sync = () => setTimeout(() => resolve(StarGen.generate(n, k, { timeLimit: 4000 })), 30);
+      if (!workerOk) return sync();
+      try {
+        if (!worker) worker = new Worker('generator.js');
+      } catch (e) { workerOk = false; return sync(); }
+      const id = ++reqId;
+      let done = false;
+      worker.onmessage = (e) => {
+        if (e.data.id !== id || done) return;
+        done = true; resolve(e.data.puzzle);
+      };
+      worker.onerror = (e) => {
+        if (e.preventDefault) e.preventDefault();
+        if (done) return;
+        done = true; workerOk = false; worker = null; sync();
+      };
+      worker.postMessage({ id, n, k, timeLimit: 4000 });
+    });
+  }
+
+  let generating = 0;
   function newGame(n, k) {
+    const token = ++generating;
+    fillSizes(k, n);
     statusEl.textContent = 'generating…';
-    statusEl.className = 'status';
-    setTimeout(() => {
-      const p = StarGen.generate(n, k, { timeLimit: 3000 });
+    statusEl.className = 'status busy';
+    boardEl.classList.remove('entering', 'solved');
+    if (G) {
+      boardEl.classList.add('leaving');
+      colLocksEl.classList.add('leaving');
+      rowLocksEl.classList.add('leaving');
+    }
+    Sound.play('fresh');
+    const minWait = new Promise((r) => setTimeout(r, G ? 240 : 0));
+    Promise.all([generate(n, k), minWait]).then(([p]) => {
+      if (token !== generating) return; // a newer request replaced this one
       G = {
         n, k,
         regions: p.regions,
@@ -184,11 +237,28 @@
       };
       history = [];
       statusEl.textContent = '';
+      statusEl.className = 'status';
       buildBoard();
+      playEnter();
       startTimer();
       persist();
-      Sound.play('fresh');
-    }, 20);
+    });
+  }
+
+  function playEnter() {
+    [boardEl, colLocksEl, rowLocksEl].forEach((el) => el.classList.remove('leaving'));
+    boardEl.classList.remove('entering');
+    void boardEl.offsetWidth;
+    boardEl.classList.add('entering');
+    [...colLocksEl.children, ...rowLocksEl.children].forEach((b, i) => {
+      b.style.setProperty('--i', i % G.n);
+      b.classList.add('enter');
+    });
+    Sound.play('appear');
+    setTimeout(() => {
+      boardEl.classList.remove('entering');
+      document.querySelectorAll('.lock.enter').forEach((b) => b.classList.remove('enter'));
+    }, 1100);
   }
 
   function persist() { if (G) save('sb-game', Object.assign({}, G, { elapsed: currentElapsed() })); }
@@ -235,7 +305,7 @@
     const avail = Math.min(window.innerWidth - 32 - lockw - gap, 560);
     const availH = window.innerHeight - 260;
     const fit = Math.floor(Math.min(avail, Math.max(availH, 260)) / G.n);
-    return Math.max(28, Math.min(56, fit));
+    return Math.max(18, Math.min(56, fit));
   }
 
   function buildBoard() {
@@ -244,7 +314,7 @@
     document.documentElement.style.setProperty('--cell', cellSize + 'px');
     boardEl.style.setProperty('--n', n);
     boardEl.classList.remove('solved');
-    sizeSel.value = n + '-' + G.k;
+    fillSizes(G.k, n);
 
     // cells
     cellsEl.innerHTML = '';
@@ -310,12 +380,6 @@
     }
     thin.forEach((l) => linesEl.appendChild(l));
     thick.forEach((l) => linesEl.appendChild(l));
-    const frame = document.createElementNS(SVGNS, 'rect');
-    frame.setAttribute('x', 1.5); frame.setAttribute('y', 1.5);
-    frame.setAttribute('width', size - 3); frame.setAttribute('height', size - 3);
-    frame.setAttribute('rx', 5);
-    frame.setAttribute('class', 'frame');
-    linesEl.appendChild(frame);
   }
 
   /* ================= rules ================= */
@@ -417,10 +481,39 @@
   }
 
   function afterChange() {
-    const { complete } = analyse();
     render();
-    if (complete && !G.solved) win();
+    if (statusEl.classList.contains('wrong')) { statusEl.textContent = ''; statusEl.className = 'status'; }
     persist();
+  }
+
+  function finish() {
+    if (!G || G.solved) return;
+    const { n, k, cells, regions } = G;
+    const rowC = new Array(n).fill(0), colC = new Array(n).fill(0), regC = new Array(n).fill(0);
+    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
+      if (cells[r][c] === STAR) { rowC[r]++; colC[c]++; regC[regions[r][c]]++; }
+    }
+    const { bad, complete } = analyse();
+    if (complete) { win(); return; }
+    const off = (arr) => arr.filter((v) => v !== k).length;
+    const touching = bad.some((row) => row.some(Boolean));
+    const parts = [];
+    const rows = off(rowC), cols = off(colC), regs = off(regC);
+    if (rows) parts.push(rows + (rows === 1 ? ' row' : ' rows'));
+    if (cols) parts.push(cols + (cols === 1 ? ' column' : ' columns'));
+    if (regs) parts.push(regs + (regs === 1 ? ' region' : ' regions'));
+    let msg = 'not quite. ';
+    if (parts.length) {
+      const list = parts.length > 1 ? parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1] : parts[0];
+      msg += list + ' ' + (rows + cols + regs === 1 ? "doesn't" : "don't") + ' have ' + k + (k === 1 ? ' star' : ' stars') + '.';
+    }
+    if (touching) msg += (parts.length ? ' ' : '') + 'Some stars are touching.';
+    statusEl.textContent = msg;
+    statusEl.className = 'status wrong';
+    boardEl.classList.remove('nope');
+    void boardEl.offsetWidth;
+    boardEl.classList.add('nope');
+    Sound.play('wrong');
   }
 
   function win() {
@@ -567,13 +660,15 @@
   $('helpBtn').addEventListener('click', () => $('help').showModal());
   $('undoBtn').addEventListener('click', undo);
   $('resetBtn').addEventListener('click', reset);
-  $('newBtn').addEventListener('click', () => {
-    const [n, k] = sizeSel.value.split('-').map(Number);
-    newGame(n, k);
+  $('finishBtn').addEventListener('click', finish);
+  $('newBtn').addEventListener('click', () => newGame(+sizeSel.value, +$('starsRange').value));
+  sizeSel.addEventListener('change', () => newGame(+sizeSel.value, +$('starsRange').value));
+  $('starsRange').addEventListener('input', (e) => {
+    $('starsVal').textContent = e.target.value + '★';
   });
-  sizeSel.addEventListener('change', () => {
-    const [n, k] = sizeSel.value.split('-').map(Number);
-    newGame(n, k);
+  $('starsRange').addEventListener('change', (e) => {
+    const k = +e.target.value;
+    newGame(DEFAULT_SIZE[k], k);
   });
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', renderChrome);
 

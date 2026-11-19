@@ -27,13 +27,13 @@
     </header>
 
     <div class="bar">
-      <select id="sizeSel" aria-label="Puzzle size">
-        <option value="5-1">5×5 · 1★</option>
-        <option value="6-1">6×6 · 1★</option>
-        <option value="8-1" selected>8×8 · 1★</option>
-        <option value="9-1">9×9 · 1★</option>
-        <option value="10-2">10×10 · 2★</option>
-      </select>
+      <div class="controls">
+        <label class="stars-ctl" for="starsRange">
+          <span id="starsVal" class="stars-val">1★</span>
+          <input id="starsRange" type="range" min="1" max="3" step="1" value="1" aria-label="Stars per row">
+        </label>
+        <select id="sizeSel" aria-label="Grid size"></select>
+      </div>
       <span id="timer" class="timer">0:00</span>
     </div>
 
@@ -54,18 +54,19 @@
     <div class="actions">
       <button id="undoBtn" class="btn">undo</button>
       <button id="resetBtn" class="btn">reset</button>
-      <button id="newBtn" class="btn primary">new puzzle</button>
+      <button id="newBtn" class="btn">new puzzle</button>
+      <button id="finishBtn" class="btn primary">finish</button>
     </div>
   </main>
 
   <dialog id="help" class="help">
     <h2>how to play</h2>
     <ul>
-      <li>Place stars so every <b>row</b>, <b>column</b> and outlined <b>region</b> holds the same number of stars (1 or 2, set by the size you pick).</li>
+      <li>Place stars so every <b>row</b>, <b>column</b> and outlined <b>region</b> holds the same number of stars (1, 2 or 3, set by the slider).</li>
       <li>Stars can never touch, not even diagonally.</li>
       <li>Tap a square to place a <span class="k">★</span>. Tap it again to remove it.</li>
       <li>Tap a <b>lock</b> above a column or beside a row to lock it. The whole line turns red and can't be edited until you unlock it.</li>
-      <li><span class="k">Ctrl Z</span> undoes.</li>
+      <li>Press <b>finish</b> to check your answer. <span class="k">Ctrl Z</span> undoes.</li>
     </ul>
     <form method="dialog"><button class="btn primary">got it</button></form>
   </dialog>

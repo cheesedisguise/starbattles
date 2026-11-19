@@ -27,29 +27,53 @@
     return out;
   }
 
+  // Most non-touching stars that fit in one row's cells (bitmask).
+  const indepCache = {};
+  function indepTable(n) {
+    if (indepCache[n]) return indepCache[n];
+    const t = new Uint8Array(1 << n);
+    for (let m = 1; m < (1 << n); m++) {
+      // greedy from the lowest bit is optimal on a line
+      let x = m, cnt = 0;
+      while (x) { const low = x & -x; cnt++; x &= ~(low | (low << 1)); }
+      t[m] = cnt;
+    }
+    return (indepCache[n] = t);
+  }
+
   /* Count solutions (stops at `limit`). Returns { count, solutions }
-   * where each solution is an array of row masks. */
-  function solve(regions, n, k, limit) {
+   * where each solution is an array of row masks. count is -1 when the
+   * step budget runs out before the answer is known. */
+  function solve(regions, n, k, limit, budget) {
     limit = limit || 2;
+    budget = budget || 400000;
     const combos = rowCombos(n, k);
-    const lastRow = new Array(n).fill(-1);
-    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) lastRow[regions[r][c]] = r;
+    const indep = indepTable(n);
+    // regMask[r][g]: cells of region g in row r
+    const regMask = Array.from({ length: n }, () => new Array(n).fill(0));
+    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) regMask[r][regions[r][c]] |= 1 << c;
+    // capFrom[r][g]: most stars region g could still take from rows r..n-1
+    const capFrom = Array.from({ length: n + 2 }, () => new Array(n).fill(0));
+    for (let r = n - 1; r >= 0; r--) for (let g = 0; g < n; g++) {
+      capFrom[r][g] = capFrom[r + 1][g] + Math.min(k, indep[regMask[r][g]]);
+    }
 
     const regCount = new Array(n).fill(0);
     const colCount = new Array(n).fill(0);
     const rows = new Array(n);
     const solutions = [];
+    let steps = 0, aborted = false;
 
     function rec(r, prev) {
-      if (solutions.length >= limit) return;
+      if (solutions.length >= limit || aborted) return;
       if (r === n) { solutions.push(rows.slice()); return; }
+      if (++steps > budget) { aborted = true; return; }
       const blocked = prev | (prev << 1) | (prev >> 1);
       const remainingAfter = n - r - 1;
       for (let i = 0; i < combos.length; i++) {
         const m = combos[i];
         if (m & blocked) continue;
         let ok = true;
-        // column and region capacity
         for (let c = 0; c < n && ok; c++) {
           if (m & (1 << c)) {
             if (colCount[c] >= k) ok = false;
@@ -57,15 +81,20 @@
           }
         }
         if (!ok) continue;
-        // a region can hold at most k; count new stars per region
         for (let c = 0; c < n; c++) if (m & (1 << c)) { colCount[c]++; regCount[regions[r][c]]++; }
         let feasible = true;
         for (let c = 0; c < n && feasible; c++) {
           if (regCount[regions[r][c]] > k) feasible = false;
         }
         if (feasible) {
+          // can every region still reach k stars?
+          const nextBlocked = m | (m << 1) | (m >> 1);
           for (let g = 0; g < n && feasible; g++) {
-            if (lastRow[g] <= r && regCount[g] < k) feasible = false;
+            const need = k - regCount[g];
+            if (need <= 0) continue;
+            let cap = capFrom[r + 2] ? capFrom[r + 2][g] : 0;
+            if (r + 1 < n) cap += Math.min(k, indep[regMask[r + 1][g] & ~nextBlocked]);
+            if (cap < need) feasible = false;
           }
           for (let c = 0; c < n && feasible; c++) {
             // stars in one column can't sit in neighbouring rows
@@ -76,11 +105,11 @@
         }
         if (feasible) { rows[r] = m; rec(r + 1, m); }
         for (let c = 0; c < n; c++) if (m & (1 << c)) { colCount[c]--; regCount[regions[r][c]]--; }
-        if (solutions.length >= limit) return;
+        if (solutions.length >= limit || aborted) return;
       }
     }
     rec(0, 0);
-    return { count: solutions.length, solutions };
+    return { count: aborted ? -1 : solutions.length, solutions };
   }
 
   // Random valid star layout (k per row/column, none touching).
@@ -133,9 +162,10 @@
     return reg;
   }
 
-  // For 2-star puzzles: merge 2n mini regions into n pairs of neighbours.
-  function pairRegions(n, mini) {
-    const m = 2 * n;
+  // For k-star puzzles: merge k*n mini regions into n connected groups of k.
+  function groupRegions(n, k, mini) {
+    if (k === 1) return mini;
+    const m = k * n;
     const adj = Array.from({ length: m }, () => new Set());
     for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
       for (const [dr, dc] of [[1, 0], [0, 1]]) {
@@ -146,29 +176,34 @@
         }
       }
     }
-    for (let attempt = 0; attempt < 300; attempt++) {
-      const match = new Array(m).fill(-1);
+    const freeDeg = (i, group) => {
+      let d = 0;
+      adj[i].forEach((j) => { if (group[j] === -1) d++; });
+      return d;
+    };
+    for (let attempt = 0; attempt < 400; attempt++) {
+      const group = new Array(m).fill(-1);
       let ok = true;
-      for (let step = 0; step < n; step++) {
-        // pick the unmatched region with fewest unmatched neighbours
+      for (let g = 0; g < n && ok; g++) {
+        // start from the most boxed-in unassigned region
         let best = -1, bestDeg = Infinity;
         for (let i = 0; i < m; i++) {
-          if (match[i] !== -1) continue;
-          let d = 0;
-          adj[i].forEach((j) => { if (match[j] === -1) d++; });
-          d += Math.random() * 0.9;
+          if (group[i] !== -1) continue;
+          const d = freeDeg(i, group) + Math.random() * 0.9;
           if (d < bestDeg) { bestDeg = d; best = i; }
         }
-        const opts = [...adj[best]].filter((j) => match[j] === -1);
-        if (!opts.length) { ok = false; break; }
-        const j = opts[(Math.random() * opts.length) | 0];
-        match[best] = j; match[j] = best;
+        group[best] = g;
+        const members = [best];
+        while (members.length < k) {
+          const opts = new Set();
+          members.forEach((i) => adj[i].forEach((j) => { if (group[j] === -1) opts.add(j); }));
+          if (!opts.size) { ok = false; break; }
+          const list = [...opts].sort((a, b) => freeDeg(a, group) - freeDeg(b, group) + (Math.random() - 0.5) * 1.8);
+          group[list[0]] = g;
+          members.push(list[0]);
+        }
       }
-      if (!ok) continue;
-      const id = new Array(m).fill(-1);
-      let next = 0;
-      for (let i = 0; i < m; i++) if (id[i] === -1) { id[i] = id[match[i]] = next++; }
-      return mini.map((row) => row.map((v) => id[v]));
+      if (ok) return mini.map((row) => row.map((v) => group[v]));
     }
     return null;
   }
@@ -213,6 +248,7 @@
     const deadline = Date.now() + (opts.timeLimit || 4000);
     let fallback = null;
     while (true) {
+      if (Date.now() > deadline && fallback) return fallback;
       const rows = randomLayout(n, k);
       if (!rows) continue;
       const stars = [];
@@ -220,18 +256,15 @@
       for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
         if (rows[r] & (1 << c)) { stars.push([r, c]); isStar[r][c] = true; }
       }
-      let reg;
-      if (k === 1) reg = growRegions(n, stars);
-      else {
-        reg = pairRegions(n, growRegions(n, stars));
-        if (!reg) continue;
-      }
+      const reg = groupRegions(n, k, growRegions(n, stars));
+      if (!reg) { if (Date.now() > deadline && fallback) return fallback; continue; }
       if (!fallback) fallback = { regions: reg.map((x) => x.slice()), solution: rows.slice(), unique: false };
 
       for (let iter = 0; iter < 400; iter++) {
         const res = solve(reg, n, k, 2);
         if (res.count === 1) return { regions: reg, solution: rows, unique: true };
         const alt = res.solutions.find((s) => s.some((m, i) => m !== rows[i]));
+        if (!alt) break; // too hard to check: start again with a fresh layout
         // cells that are stars only in the alternative solution
         const cand = [];
         for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
@@ -255,3 +288,11 @@
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else global.StarGen = api;
 })(typeof self !== 'undefined' ? self : this);
+
+// When loaded as a Web Worker, generate puzzles off the main thread.
+if (typeof document === 'undefined' && typeof self !== 'undefined' && typeof importScripts === 'function') {
+  self.onmessage = (e) => {
+    const { id, n, k, timeLimit } = e.data;
+    self.postMessage({ id, puzzle: self.StarGen.generate(n, k, { timeLimit }) });
+  };
+}
