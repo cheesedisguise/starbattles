@@ -355,7 +355,14 @@
       const el = els[r * n + c];
       const v = cells[r][c];
       if (el._v !== v) {
-        el.innerHTML = v === STAR ? ICONS.star : v === DOT ? '<span class="dot"></span>' : '';
+        const old = el.querySelector('.star');
+        if (el._v === STAR && v !== STAR && old) {
+          // let the star spin away before it goes
+          old.classList.add('out');
+          setTimeout(() => old.remove(), 300);
+        } else {
+          el.innerHTML = v === STAR ? ICONS.star : '';
+        }
         el._v = v;
       }
       el.classList.toggle('bad', !!bad[r][c]);
@@ -498,7 +505,6 @@
     if (!pos) return;
     e.preventDefault();
     const [r, c] = pos;
-    cellsEl.children[r * G.n + c].focus({ preventScroll: true });
     if (isLocked(r, c)) { denied(r, c); return; }
     const next = G.cells[r][c] === STAR ? EMPTY : STAR;
     pushHistory();

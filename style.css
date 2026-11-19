@@ -204,7 +204,7 @@ select option { background: var(--surface); color: var(--ink); }
   cursor: pointer;
   position: relative;
 }
-.cell:focus-visible { outline: 2px solid var(--star); outline-offset: -4px; }
+.cell:focus { outline: none; }
 .cell.locked { cursor: not-allowed; }
 .cell.shake { animation: shake .3s ease; }
 @keyframes shake {
@@ -230,6 +230,10 @@ select option { background: var(--surface); color: var(--ink); }
   transition: color .2s ease;
 }
 .cell.bad .star { color: var(--star-bad); }
+.star.out { animation: starOut .28s ease-in forwards; }
+@keyframes starOut {
+  to { transform: scale(0) rotate(72deg); opacity: 0; }
+}
 @keyframes starIn {
   from { transform: scale(0) rotate(-72deg); }
   to { transform: scale(1) rotate(0); }
