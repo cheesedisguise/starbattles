@@ -380,26 +380,17 @@
     b.setAttribute('aria-label', (on ? 'Unlock ' : 'Lock ') + label + ' ' + (i + 1));
   }
 
-  // Red rounded bands over the non-star squares of each locked line.
+  // Red rounded band over each whole locked line.
   function renderBands() {
-    const { n, cells } = G;
+    const { n } = G;
     const s = cellSize, inset = 3;
     const want = [];
-    const runs = (isStarAt, place) => {
-      let start = -1;
-      for (let i = 0; i <= n; i++) {
-        const open = i < n && !isStarAt(i);
-        if (open && start < 0) start = i;
-        if (!open && start >= 0) { place(start, i - start); start = -1; }
-      }
-    };
+    const len = n * s - inset * 2;
     for (let r = 0; r < n; r++) if (G.rowLock[r]) {
-      runs((c) => cells[r][c] === STAR, (c0, len) =>
-        want.push({ key: `r${r}:${c0}:${len}`, x: c0 * s + inset, y: r * s + inset, w: len * s - inset * 2, h: s - inset * 2 }));
+      want.push({ key: 'r' + r, x: inset, y: r * s + inset, w: len, h: s - inset * 2 });
     }
     for (let c = 0; c < n; c++) if (G.colLock[c]) {
-      runs((r) => cells[r][c] === STAR, (r0, len) =>
-        want.push({ key: `c${c}:${r0}:${len}`, x: c * s + inset, y: r0 * s + inset, w: s - inset * 2, h: len * s - inset * 2 }));
+      want.push({ key: 'c' + c, x: c * s + inset, y: inset, w: s - inset * 2, h: len });
     }
     // keep existing bands so they don't re-animate
     const existing = new Map([...bandsEl.children].map((el) => [el.dataset.key, el]));
@@ -494,8 +485,6 @@
   }
 
   /* ================= pointer input ================= */
-  let drag = null; // { mode: DOT | EMPTY, last }
-
   function cellFromEvent(e) {
     const el = document.elementFromPoint(e.clientX, e.clientY);
     const cell = el && el.closest ? el.closest('.cell') : null;
@@ -504,44 +493,19 @@
   }
 
   cellsEl.addEventListener('pointerdown', (e) => {
-    if (!G) return;
+    if (!G || e.button !== 0) return;
     const pos = cellFromEvent(e);
     if (!pos) return;
     e.preventDefault();
     const [r, c] = pos;
     cellsEl.children[r * G.n + c].focus({ preventScroll: true });
     if (isLocked(r, c)) { denied(r, c); return; }
-
-    const cur = G.cells[r][c];
-    let next;
-    if (e.button === 2) next = cur === DOT ? EMPTY : DOT;
-    else if (e.button === 0) next = (cur + 1) % 3;
-    else return;
-
+    const next = G.cells[r][c] === STAR ? EMPTY : STAR;
     pushHistory();
     setCell(r, c, next);
     soundFor(r, c, next);
-    drag = (next === DOT || (e.button === 2 && next === EMPTY))
-      ? { mode: next, last: r * G.n + c }
-      : null;
     afterChange();
   });
-
-  window.addEventListener('pointermove', (e) => {
-    if (!drag || !G || G.solved) return;
-    const pos = cellFromEvent(e);
-    if (!pos) return;
-    const [r, c] = pos;
-    const id = r * G.n + c;
-    if (id === drag.last) return;
-    drag.last = id;
-    if (isLocked(r, c)) return;
-    const cur = G.cells[r][c];
-    if (drag.mode === DOT && cur === EMPTY) { setCell(r, c, DOT); Sound.play('dot'); afterChange(); }
-    else if (drag.mode === EMPTY && cur === DOT) { setCell(r, c, EMPTY); Sound.play('erase'); afterChange(); }
-  });
-  window.addEventListener('pointerup', () => { drag = null; });
-  window.addEventListener('pointercancel', () => { drag = null; });
   boardEl.addEventListener('contextmenu', (e) => e.preventDefault());
 
   /* ================= keyboard ================= */
@@ -559,11 +523,11 @@
       next.tabIndex = 0; next.focus();
       return;
     }
-    const map = { Enter: 'cycle', ' ': 'cycle', s: STAR, '*': STAR, d: DOT, '.': DOT, x: DOT, Backspace: EMPTY, Delete: EMPTY };
+    const map = { Enter: 'cycle', ' ': 'cycle', s: STAR, '*': STAR, Backspace: EMPTY, Delete: EMPTY };
     if (!(e.key in map)) return;
     e.preventDefault();
     if (isLocked(r, c)) { denied(r, c); return; }
-    const next = map[e.key] === 'cycle' ? (G.cells[r][c] + 1) % 3 : map[e.key];
+    const next = map[e.key] === 'cycle' ? (G.cells[r][c] === STAR ? EMPTY : STAR) : map[e.key];
     if (G.cells[r][c] === next) return;
     pushHistory();
     setCell(r, c, next);
@@ -629,6 +593,7 @@
   const saved = load('sb-game', null);
   if (saved && saved.regions && saved.cells && saved.n === saved.cells.length) {
     G = saved;
+    G.cells = G.cells.map((row) => row.map((v) => (v === STAR ? STAR : EMPTY)));
     buildBoard();
     startTimer();
     if (G.solved) {
