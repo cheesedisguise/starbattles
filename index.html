@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Star Battle</title>
+  <meta name="description" content="A minimalist Star Battle logic puzzle.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='%23e2a93b' d='M12 2l2.9 6.6 7.1.6-5.4 4.7 1.6 7L12 17.3 5.8 21l1.6-7L2 9.2l7.1-.6z'/></svg>">
+  <link rel="stylesheet" href="style.css">
+  <script>
+    // Apply saved theme before paint to avoid a flash.
+    try {
+      var t = localStorage.getItem('sb-theme');
+      if (t) document.documentElement.dataset.theme = t;
+    } catch (e) {}
+  </script>
+</head>
+<body>
+  <main class="app">
+    <header class="top">
+      <h1>star battle</h1>
+      <div class="icons">
+        <button id="soundBtn" class="icon-btn" aria-label="Toggle sound" title="Sound"></button>
+        <button id="themeBtn" class="icon-btn" aria-label="Toggle dark mode" title="Dark mode"></button>
+        <button id="helpBtn" class="icon-btn" aria-label="How to play" title="How to play">?</button>
+      </div>
+    </header>
+
+    <div class="bar">
+      <select id="sizeSel" aria-label="Puzzle size">
+        <option value="5-1">5×5 · 1★</option>
+        <option value="6-1">6×6 · 1★</option>
+        <option value="8-1" selected>8×8 · 1★</option>
+        <option value="9-1">9×9 · 1★</option>
+        <option value="10-2">10×10 · 2★</option>
+      </select>
+      <span id="timer" class="timer">0:00</span>
+    </div>
+
+    <section class="stage">
+      <div id="board-wrap" class="board-wrap">
+        <div id="colLocks" class="col-locks"></div>
+        <div class="corner"></div>
+        <div id="board" class="board" role="grid" aria-label="Star Battle grid">
+          <div id="bands" class="bands"></div>
+          <div id="cells" class="cells"></div>
+          <svg id="lines" class="lines" aria-hidden="true"></svg>
+        </div>
+        <div id="rowLocks" class="row-locks"></div>
+      </div>
+      <p id="status" class="status" aria-live="polite"></p>
+    </section>
+
+    <div class="actions">
+      <button id="undoBtn" class="btn">undo</button>
+      <button id="resetBtn" class="btn">reset</button>
+      <button id="newBtn" class="btn primary">new puzzle</button>
+    </div>
+  </main>
+
+  <dialog id="help" class="help">
+    <h2>how to play</h2>
+    <ul>
+      <li>Place stars so every <b>row</b>, <b>column</b> and outlined <b>region</b> holds the same number of stars (1 or 2, set by the size you pick).</li>
+      <li>Stars can never touch, not even diagonally.</li>
+      <li>Tap a square to cycle: <span class="k">empty</span> → <span class="k">dot</span> → <span class="k">★</span>. Right‑click places a dot. Drag to paint dots.</li>
+      <li>Tap a <b>lock</b> above a column or beside a row to lock it. Its empty squares turn red and the whole line can't be edited until you unlock it.</li>
+      <li><span class="k">Ctrl Z</span> undoes.</li>
+    </ul>
+    <form method="dialog"><button class="btn primary">got it</button></form>
+  </dialog>
+
+  <script src="generator.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
